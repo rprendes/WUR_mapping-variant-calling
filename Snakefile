@@ -8,10 +8,14 @@ from pathlib import Path
 # date: june 2021               #
 #################################
 
-
+#################################
+# Modify: Gonzalez-PrendesR  #
+#                            #
+# date: Oct 2022             #
+#################################
 include: "rules/create_file_log.smk"
 
-pipeline = "mapping-var-calling"
+pipeline = "qc-mapping-var-calling"
 
 # Sets the working directory to the directory where you want to save the results (set in the config file)
 if "OUTDIR" in config:
@@ -19,11 +23,14 @@ if "OUTDIR" in config:
     workdir: config["OUTDIR"]
 
 ASSEMBLY=config["ASSEMBLY"]
+READS_R:= config["READS_DIR_RAW"]
 READS = config["READS_DIR"]
 PREFIX = config["PREFIX"]
 
+    
 Path("logs_slurm").mkdir(parents=True, exist_ok=True)
 
+readsR, = glob_wildcards(os.path.join(READS_R, "{sample}.gz"))
 reads, = glob_wildcards(os.path.join(READS, "{sample}.gz"))
 
 
@@ -39,7 +46,57 @@ rule all:
         expand("variant_calling/{prefix}.vcf.stats", prefix = PREFIX)
 
 
-
+rule qc_fastp_PE:
+    input:
+        sample=expand(os.path.join(READS_R, "{sample}.gz"), sample=readsR)
+         read1="READS_R/{sample}1.fastq.gz",
+         read2="READS_R/{sample}2.fastq.gz",
+    output:
+        trimmed1="READS/{sample}.2use.1.fastq.gz",
+        trimmed2="READS/{sample}.2use.2.fastq.gz",
+        failed="READS/{sample}.fail_out.fq.gz",
+        html="READS/{sample}.html",
+        json="READS/{sample}.json"
+    log:
+        "READS/{sample}.log"
+    params:
+        extra=""
+    threads: 4
+    shell:
+        """"
+ module load fastp
+        
+fastp -i {input.read1} -I {input.read2} \
+-o {output.trimmed1} \
+-O {output.trimmed2} \
+--failed_out {output.failed} \
+--dont_overwrite \
+--detect_adapter_for_pe \
+--length_required 36 \
+--html {output.html} \
+-j {output.json} \
+--thread {threads} \
+-c \
+-p
+"""
+        
+rule Fastqctrimmedfiles:
+    input:
+        trimread=expand(os.path.join(READS, "{sample}.gz"), sample=reads)
+        
+        output:
+        gz="QC/trimread_fastqc.gz",
+        html="QC/trimread_fastqc.html",
+    threads:
+        1
+    params:
+        path="QC/",
+    shell:
+        """
+        fastqc {input.rawread} --threads {threads} -o {params.path}
+        """
+      
+        
 rule bwa_index:
     input: 
         ASSEMBLY
